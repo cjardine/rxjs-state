@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+
+<my-component></my-component>
+<script src="https://unpkg.com/@reactivex/rxjs@6.6.3/dist/global/rxjs.umd.js" type="text/javascript"></script>
+<script defer type="module">
+    import {BehaviorSubject, pipe} from 'https://dev.jspm.io/rxjs@6/_esm2015';
+    import {filter} from 'https://dev.jspm.io/rxjs@6/_esm2015/operators';
+    /*
+An RXJS state service example using vanilla JS, could be for all state, or for a smaller domain
+
+Can also create UNDO/REDO functionality very easily.
+ */
+
+    // Singleton SERVICE "FooService.js"
+    const _fooDataStream = new BehaviorSubject({}); // RXJS event stream init created as private
+    class FooService {
+        constructor() {
+            let cachedPreviousValue = {};
+            this.fooServiceSubscription = this.fooDataStream
+                .subscribe(({type, data, previousValue}) => {
+                    switch (type) {
+                        case 'READ_SUCCESS':
+                            cachedPreviousValue = previousValue;
+                            break;
+                        case 'UPDATE_ERROR':
+                            // on update error revert to previous UI state
+                            _fooDataStream.next(cachedPreviousValue);
+                    }
+                });
+        }
+
+        fooDataStream = _fooDataStream.asObservable();
+
+        // This is not really part of the example, but illustrates how your service handles API IO
+        getData = () => {
+            // you could use any library here for API access, just going with `fetch` to reduce cognitive overhead
+            fetch('https://api.mocki.io/v1/695e72ff')
+                .then(response => response.json())
+                .then((data) => {
+                    // this publish can be implemented in whatever way makes sense for your implementation,
+                    // `type` is not needed I just put it in there to show similarity to Redux
+                    _fooDataStream.next({type: 'READ_SUCCESS', data, previousValue: _fooDataStream.getValue()});
+                })
+                .catch((data) => {
+                    _fooDataStream.next({type: 'READ_ERROR', data});
+                });
+        };
+
+        // !!! DON'T USE; WON'T WORK !!!
+        setData(data) {
+            // updates UI immediately (or not, can handle this after success if we want to)
+            _fooDataStream.next({type: 'READ_SUCCESS', data});
+
+            fetch('url.com', {method: 'PUT', body: data})
+                .then((rdata) => {
+                    _fooDataStream.next({type: 'UPDATE_SUCCESS', data});
+                })
+                .catch((data) => {
+                    _fooDataStream.next({type: 'UPDATE_ERROR', data});
+                });
+        }
+    }
+
+    const fooService = new FooService();
+    // export default fooService;
+
+
+    // COMPONENT "MyComponent.js"
+    // import fooService from 'FooService.js';
+
+    class MyComponent extends HTMLElement {
+        template = `<p></p>`;
+        p;
+        fooServiceSubscription;
+
+        constructor() {
+            super();
+        }
+
+        connectedCallback() {
+            this.innerHTML = this.template;
+            this.p = this.querySelector('p');
+            this.fooServiceSubscription = fooService.fooDataStream
+                .pipe(
+                    filter(({type, data}) => {
+                        return type === 'READ_SUCCESS';
+                    })
+                )
+                .subscribe(({type, data}) => {
+                    this.p.innerText = `${data.name} says "IT'S A TRAP!"`;
+                });
+            fooService.getData();
+
+            return () => {
+                // unsubscribe to service
+                this.fooServiceSubscription.unsubscribe();
+            }
+        }
+    }
+
+    customElements.define('my-component', MyComponent);
+
+
+</script>
+</body>
+</html>
